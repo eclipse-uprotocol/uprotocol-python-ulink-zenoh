@@ -46,8 +46,8 @@ from org_eclipse_uprotocol.transport.datamodel.upriority import UPriority
 from org_eclipse_uprotocol.transport.datamodel.ustatus import UStatus, Code
 from org_eclipse_uprotocol.transport.utransport import UTransport
 from org_eclipse_uprotocol.transport.validate.uattributesvalidator import UAttributesValidator
-from org_eclipse_uprotocol.uri.datamodel.uentity import UEntity
-from org_eclipse_uprotocol.uri.datamodel.uuri import UUri
+from org_eclipse_uprotocol.proto.uri_pb2 import UEntity,UUri
+from org_eclipse_uprotocol.uri.factory.uuri_factory import UUriFactory
 from org_eclipse_uprotocol.uri.serializer.longuriserializer import LongUriSerializer
 from org_eclipse_uprotocol.uri.validator.urivalidator import UriValidator
 from org_eclipse_uprotocol.uuid.factory.uuidutils import UUIDUtils
@@ -239,13 +239,13 @@ class ZenohUtils:
             ce = CloudEventFactory.publish(LongUriSerializer().serialize(uri), any_message, ce_attributes)
         elif attributes.type == UMessageType.REQUEST:
             applicationuri_for_rpc = LongUriSerializer().serialize(
-                UUri.rpc_response(uri.get_u_authority(), uri.get_u_entity()))
+                UUriFactory.rpc_response(uri.authority, uri.entity))
             # create rpc cloud event
             ce = CloudEventFactory.request(applicationuri_for_rpc, LongUriSerializer().serialize(uri),
                                            UUIDUtils.toString(attributes.id), any_message, ce_attributes)
         elif attributes.type == UMessageType.RESPONSE:
             applicationuri_for_rpc = LongUriSerializer().serialize(
-                UUri.rpc_response(uri.get_u_authority(), uri.get_u_entity()))
+                UUriFactory.rpc_response(uri.authority, uri.entity))
             methoduri = LongUriSerializer().serialize(uri)
             req_id = UUIDUtils.toString(attributes.id)
             # create rpc response cloud event
