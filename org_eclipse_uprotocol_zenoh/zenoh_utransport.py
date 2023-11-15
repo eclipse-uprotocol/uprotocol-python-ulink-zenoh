@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------
 
 # Copyright (c) 2023 General Motors GTO LLC
-
+#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -9,17 +9,22 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-
-#    http://www.apache.org/licenses/LICENSE-2.0
-
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: 2023 General Motors GTO LLC
+# SPDX-License-Identifier: Apache-2.0
 
 # -------------------------------------------------------------------------
+
+
 
 
 import json
@@ -39,18 +44,18 @@ from org_eclipse_uprotocol.cloudevent.serialize.base64protobufserializer import 
 from org_eclipse_uprotocol.cloudevent.serialize.cloudeventserializers import CloudEventSerializers
 from org_eclipse_uprotocol.proto.uri_pb2 import UEntity, UUri
 from org_eclipse_uprotocol.rpc.rpcclient import RpcClient
-from org_eclipse_uprotocol.transport.datamodel.uattributes import UAttributes, UAttributesBuilder
+from org_eclipse_uprotocol.proto.uattributes_pb2 import UAttributes, UMessageType, UPriority
+from org_eclipse_uprotocol.proto.upayload_pb2 import UPayloadFormat
+from org_eclipse_uprotocol.transport.builder.uattributesbuilder import UAttributesBuilder
 from org_eclipse_uprotocol.transport.datamodel.ulistener import UListener
-from org_eclipse_uprotocol.transport.datamodel.umessagetype import UMessageType
-from org_eclipse_uprotocol.transport.datamodel.upayload import UPayload, USerializationHint
-from org_eclipse_uprotocol.transport.datamodel.upriority import UPriority
+from org_eclipse_uprotocol.transport.datamodel.upayload import UPayload
 from org_eclipse_uprotocol.transport.datamodel.ustatus import UStatus, Code
 from org_eclipse_uprotocol.transport.utransport import UTransport
 from org_eclipse_uprotocol.transport.validate.uattributesvalidator import UAttributesValidator
 from org_eclipse_uprotocol.uri.builder.uresource_builder import UResourceBuilder
 from org_eclipse_uprotocol.uri.serializer.longuriserializer import LongUriSerializer
 from org_eclipse_uprotocol.uri.validator.urivalidator import UriValidator
-from org_eclipse_uprotocol.uuid.factory.uuidutils import UUIDUtils
+from org_eclipse_uprotocol.uuid.serializer.longuuidserializer import LongUuidSerializer
 from zenoh import Sample
 
 # Dictionary to store requests
@@ -87,7 +92,7 @@ class Zenoh(UTransport, RpcClient):
         if status.isFailed():
             return status
 
-        if attributes.type == UMessageType.PUBLISH:
+        if attributes.type == UMessageType.UMESSAGE_TYPE_PUBLISH:
             # check uri
             status = UriValidator.validate(topic)
             if status.isFailed():
@@ -102,7 +107,7 @@ class Zenoh(UTransport, RpcClient):
                 print('failed')
                 return UStatus.failed_with_msg_and_code(str(e), Code.UNKNOWN)
 
-        elif attributes.type == UMessageType.REQUEST:
+        elif attributes.type == UMessageType.UMESSAGE_TYPE_REQUEST:
             # check uri
             status = UriValidator.validate_rpc_method(topic)
             if status.isFailed():
@@ -112,7 +117,7 @@ class Zenoh(UTransport, RpcClient):
             ce, serialized_str = ZenohUtils.create_serialized_ce(topic, payload, attributes)
             ZenohUtils().send_rpc_request_zenoh(UCloudEvent.get_sink(ce), serialized_str)
 
-        elif attributes.type == UMessageType.RESPONSE:
+        elif attributes.type == UMessageType.UMESSAGE_TYPE_RESPONSE:
             status = UriValidator.validate_rpc_method(topic)
             if status.isFailed():
                 return status
@@ -143,13 +148,14 @@ class Zenoh(UTransport, RpcClient):
                 serialized_bytes = Base64ProtobufSerializer.serialize(query.value.payload.decode('utf-8'))
                 ce = CloudEventSerializers.JSON.serializer().deserialize(serialized_bytes)
                 data = UCloudEvent.get_payload(ce).SerializeToString()
-                hint = USerializationHint.PROTOBUF
+                hint = UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF
                 upayload = UPayload(data, hint)
                 priority = UCloudEvent.get_priority(ce)
-                uattributes = UAttributesBuilder(UUIDUtils.fromString(UCloudEvent.get_request_id(ce)),
-                                                 UMessageType.from_string(
-                                                     UCloudEvent.extract_string_value_from_attributes("type", ce)),
-                                                 UPriority.from_string(priority)).build()
+                uattributes = UAttributesBuilder(
+                    LongUuidSerializer.instance().deserialize(UCloudEvent.get_request_id(ce)),
+
+                    UCloudEvent.get_message_type(UCloudEvent.extract_string_value_from_attributes("type", ce)),
+                    priority).build()
 
                 m_requests_query[UCloudEvent.get_request_id(ce)] = query
                 listener.on_receive(uri, upayload, uattributes)
@@ -165,13 +171,14 @@ class Zenoh(UTransport, RpcClient):
                 serialized_bytes = Base64ProtobufSerializer.serialize(sample.payload.decode('utf-8'))
                 ce = CloudEventSerializers.JSON.serializer().deserialize(serialized_bytes)
                 data = UCloudEvent.get_payload(ce).SerializeToString()
-                hint = USerializationHint.PROTOBUF
+                hint = UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF
                 upayload = UPayload(data, hint)
                 priority = UCloudEvent.get_priority(ce)
                 uattributes = UAttributesBuilder(
-                    UUIDUtils.fromString(UCloudEvent.extract_string_value_from_attributes("id", ce)),
-                    UMessageType.from_string(UCloudEvent.extract_string_value_from_attributes("type", ce)),
-                    UPriority.from_string(priority)).build()
+                    LongUuidSerializer.instance().deserialize(
+                        UCloudEvent.extract_string_value_from_attributes("id", ce)),
+                    UCloudEvent.get_message_type(UCloudEvent.extract_string_value_from_attributes("type", ce)),
+                    priority).build()
                 listener.on_receive(uri, upayload, uattributes)
 
             conf = ZenohUtils.add_endpoint()
@@ -191,8 +198,8 @@ class Zenoh(UTransport, RpcClient):
 
     def invoke_method(self, topic: UUri, payload: UPayload, attributes: UAttributes) -> Future:
         # check message type,id and ttl
-        req_id = UUIDUtils.toString(attributes.id)
-        if attributes.type != UMessageType.REQUEST:
+        req_id = LongUuidSerializer.instance().serialize(attributes.id)
+        if attributes.type != UMessageType.UMESSAGE_TYPE_REQUEST:
             raise Exception("Event type is invalid")
         if req_id is None or len(req_id.strip()) == 0:
             raise Exception("Event id is missing")
@@ -234,20 +241,21 @@ class ZenohUtils:
         ce = None
         ce_attributes = UCloudEventAttributesBuilder().with_priority(attributes.priority).with_ttl(
             attributes.ttl).with_token(attributes.token).build()
-        if attributes.type == UMessageType.PUBLISH:
+        if attributes.type == UMessageType.UMESSAGE_TYPE_PUBLISH:
 
             ce = CloudEventFactory.publish(LongUriSerializer().serialize(uri), any_message, ce_attributes)
-        elif attributes.type == UMessageType.REQUEST:
+        elif attributes.type == UMessageType.UMESSAGE_TYPE_REQUEST:
             applicationuri_for_rpc = LongUriSerializer().serialize(
                 UUri(authority=uri.authority, entity=uri.entity, resource=UResourceBuilder.for_rpc_response()))
             # create rpc cloud event
             ce = CloudEventFactory.request(applicationuri_for_rpc, LongUriSerializer().serialize(uri),
-                                           UUIDUtils.toString(attributes.id), any_message, ce_attributes)
-        elif attributes.type == UMessageType.RESPONSE:
+                                           LongUuidSerializer.instance().serialize(attributes.id), any_message,
+                                           ce_attributes)
+        elif attributes.type == UMessageType.UMESSAGE_TYPE_RESPONSE:
             applicationuri_for_rpc = LongUriSerializer().serialize(
                 UUri(authority=uri.authority, entity=uri.entity, resource=UResourceBuilder.for_rpc_response()))
             methoduri = LongUriSerializer().serialize(uri)
-            req_id = UUIDUtils.toString(attributes.id)
+            req_id = LongUuidSerializer.instance().serialize(attributes.id)
             # create rpc response cloud event
             ce = CloudEventFactory.response(applicationuri_for_rpc, methoduri, req_id, any_message, ce_attributes)
 
@@ -299,7 +307,7 @@ class ZenohUtils:
                 serialized_bytes = Base64ProtobufSerializer.serialize(reply.ok.payload.decode('utf-8'))
                 ce = CloudEventSerializers.JSON.serializer().deserialize(serialized_bytes)
                 data = UCloudEvent.get_payload(ce).SerializeToString()
-                hint = USerializationHint.PROTOBUF
+                hint = UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF
                 upayload = UPayload(data, hint)
                 req_id = UCloudEvent.get_request_id(ce)
                 future_result = m_requests[req_id]
