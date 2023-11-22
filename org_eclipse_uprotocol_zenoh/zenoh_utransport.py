@@ -47,9 +47,9 @@ from org_eclipse_uprotocol.rpc.rpcclient import RpcClient
 from org_eclipse_uprotocol.proto.uattributes_pb2 import UAttributes, UMessageType, UPriority
 from org_eclipse_uprotocol.proto.upayload_pb2 import UPayloadFormat
 from org_eclipse_uprotocol.transport.builder.uattributesbuilder import UAttributesBuilder
-from org_eclipse_uprotocol.transport.datamodel.ulistener import UListener
-from org_eclipse_uprotocol.transport.datamodel.upayload import UPayload
-from org_eclipse_uprotocol.transport.datamodel.ustatus import UStatus, Code
+from org_eclipse_uprotocol.transport.ulistener import UListener
+from org_eclipse_uprotocol.proto.upayload_pb2 import UPayload
+from org_eclipse_uprotocol.proto.ustatus_pb2 import UStatus, UCode
 from org_eclipse_uprotocol.transport.utransport import UTransport
 from org_eclipse_uprotocol.transport.validate.uattributesvalidator import UAttributesValidator
 from org_eclipse_uprotocol.uri.builder.uresource_builder import UResourceBuilder
@@ -88,29 +88,25 @@ class Zenoh(UTransport, RpcClient):
     def send(self, topic: UUri, payload: UPayload, attributes: UAttributes) -> UStatus:
 
         # validate attributes
-        status = UAttributesValidator.get_validator(attributes).validate(attributes)
-        if status.isFailed():
-            return status
-
         if attributes.type == UMessageType.UMESSAGE_TYPE_PUBLISH:
             # check uri
             status = UriValidator.validate(topic)
-            if status.isFailed():
+            if status.is_failure():
                 return status
             # create publish cloudevent
             ce, serialized_str = ZenohUtils.create_serialized_ce(topic, payload, attributes)
 
             try:
                 ZenohUtils().send_data_to_zenoh(UCloudEvent.get_source(ce), serialized_str)
-                return UStatus.ok_with_ack_id("successfully publish value to zenoh_up")
+                return UStatus(message="successfully publish value to zenoh_up")
             except Exception as e:
                 print('failed')
-                return UStatus.failed_with_msg_and_code(str(e), Code.UNKNOWN)
+                return UStatus(message=str(e), code=UCode.UNKNOWN)
 
         elif attributes.type == UMessageType.UMESSAGE_TYPE_REQUEST:
             # check uri
             status = UriValidator.validate_rpc_method(topic)
-            if status.isFailed():
+            if status.is_failure():
                 return status
 
             # create request cloudevent
@@ -119,7 +115,7 @@ class Zenoh(UTransport, RpcClient):
 
         elif attributes.type == UMessageType.UMESSAGE_TYPE_RESPONSE:
             status = UriValidator.validate_rpc_method(topic)
-            if status.isFailed():
+            if status.is_failure():
                 return status
 
             # create response cloudevent
@@ -128,15 +124,15 @@ class Zenoh(UTransport, RpcClient):
             methoduri = ZenohUtils.replace_special_chars(LongUriSerializer().serialize(topic))
             m_requests_query[UCloudEvent.get_request_id(ce)].reply(Sample(methoduri, serialized_str))
             m_requests_query.pop(UCloudEvent.get_request_id(ce))
-            return UStatus.ok_with_ack_id("successfully send rpc response to zenoh")
+            return UStatus(message="successfully send rpc response to zenoh")
 
         else:
-            return UStatus().failed_with_msg_and_code("Invalid attributes type", Code.INVALID_ARGUMENT)
+            return UStatus(message="Invalid attributes type")
 
     def register_listener(self, uri: UUri, listener: UListener) -> UStatus:
         # ToDo If topic is subscribed, then only allow it to register listener
         # ToDo Subscription Service
-        if UriValidator.validate_rpc_method(uri).isSuccess():
+        if UriValidator.validate_rpc_method(uri).is_success():
             # TODO: only one listener is allowed for one method uri
             methoduri = ZenohUtils.replace_special_chars(LongUriSerializer().serialize(uri))
             conf = ZenohUtils.add_endpoint()
@@ -147,9 +143,9 @@ class Zenoh(UTransport, RpcClient):
                     f" with value: {query.value.payload}" if query.value is not None else ""))
                 serialized_bytes = Base64ProtobufSerializer.serialize(query.value.payload.decode('utf-8'))
                 ce = CloudEventSerializers.JSON.serializer().deserialize(serialized_bytes)
-                data = UCloudEvent.get_payload(ce).SerializeToString()
+                data = ce.get_data()
                 hint = UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF
-                upayload = UPayload(data, hint)
+                upayload = UPayload(value=data, format=hint)
                 priority = UCloudEvent.get_priority(ce)
                 uattributes = UAttributesBuilder(
                     LongUuidSerializer.instance().deserialize(UCloudEvent.get_request_id(ce)),
@@ -170,14 +166,13 @@ class Zenoh(UTransport, RpcClient):
                 print("Callback called...")
                 serialized_bytes = Base64ProtobufSerializer.serialize(sample.payload.decode('utf-8'))
                 ce = CloudEventSerializers.JSON.serializer().deserialize(serialized_bytes)
-                data = UCloudEvent.get_payload(ce).SerializeToString()
-                hint = UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF
-                upayload = UPayload(data, hint)
+                data = ce.get_data()
+                upayload = UPayload(value=data, format=UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF)
                 priority = UCloudEvent.get_priority(ce)
                 uattributes = UAttributesBuilder(
                     LongUuidSerializer.instance().deserialize(
-                        UCloudEvent.extract_string_value_from_attributes("id", ce)),
-                    UCloudEvent.get_message_type(UCloudEvent.extract_string_value_from_attributes("type", ce)),
+                        UCloudEvent.get_id( ce)),
+                    UCloudEvent.get_message_type(UCloudEvent.get_type( ce)),
                     priority).build()
                 listener.on_receive(uri, upayload, uattributes)
 
@@ -187,11 +182,11 @@ class Zenoh(UTransport, RpcClient):
                 session = zenoh.open(conf)
                 sub = session.declare_subscriber(new_topic, zenoh_subscribe_callback)
                 subscribers[listener] = sub
-                return UStatus.ok_with_ack_id("successfully subscribed")
+                return UStatus(message="successfully subscribed")
 
             except Exception as e:
                 print(str(e))
-                return UStatus.failed_with_msg_and_code(str(e), Code.UNKNOWN)
+                return UStatus(message=str(e), code=UCode.UNKNOWN)
 
     def unregister_listener(self, topic: UUri, listener: UListener) -> UStatus:
         print("zenoh_up unregister listener")
@@ -235,7 +230,7 @@ class ZenohUtils:
     @staticmethod
     def create_serialized_ce(uri, payload, attributes) -> Tuple[CloudEvent, str]:
         # get serialized any data from payload
-        data = payload.get_data()
+        data = payload.value
         any_message = any_pb2.Any()
         any_message.ParseFromString(data)
         ce = None
@@ -308,7 +303,7 @@ class ZenohUtils:
                 ce = CloudEventSerializers.JSON.serializer().deserialize(serialized_bytes)
                 data = UCloudEvent.get_payload(ce).SerializeToString()
                 hint = UPayloadFormat.UPAYLOAD_FORMAT_PROTOBUF
-                upayload = UPayload(data, hint)
+                upayload = UPayload(value=data,format= hint)
                 req_id = UCloudEvent.get_request_id(ce)
                 future_result = m_requests[req_id]
                 if not future_result.done():
